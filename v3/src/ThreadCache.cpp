@@ -20,10 +20,6 @@ void* ThreadCache::allocate(size_t size)
 
     size_t index = SizeClass::getIndex(size);
 
-    // 更新自由链表大小
-    // freeListSize_[index]--;
-
-
     // 检查线程本地自由链表
     // 如果 freeList_[index] 不为空，表示该链表中有可用内存块
     if (void* ptr = freeList_[index])

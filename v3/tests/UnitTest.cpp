@@ -23,12 +23,17 @@ void testBasicAllocation()
     // 测试中等大小内存分配
     void* ptr2 = MemoryPool::allocate(1024);
     assert(ptr2 != nullptr);
-    MemoryPool::deallocate(ptr2, 1024);
+    MemoryPool::deallocate(ptr2, 1024);    
 
-    // 测试大内存分配（超过MAX_BYTES）
-    void* ptr3 = MemoryPool::allocate(1024 * 1024);
+    // 测试大内存分配 64kB
+    void* ptr3 = MemoryPool::allocate(64 * 1024);
     assert(ptr3 != nullptr);
-    MemoryPool::deallocate(ptr3, 1024 * 1024);
+    MemoryPool::deallocate(ptr3, 64 * 1024);
+    
+    // 测试大内存分配（超过MAX_BYTES）
+    void* ptr4 = MemoryPool::allocate(1024 * 1024);
+    assert(ptr4 != nullptr);
+    MemoryPool::deallocate(ptr4, 1024 * 1024);
 
     std::cout << "Basic allocation test passed!" << std::endl;
 }
@@ -43,16 +48,16 @@ void testMemoryWriting()
     char* ptr = static_cast<char*>(MemoryPool::allocate(size));
     assert(ptr != nullptr);
 
-    // 写入数据
+    // 写入数据(只是测试数据不是实际的字符)
     for (size_t i = 0; i < size; ++i) 
     {
-        ptr[i] = static_cast<char>(i % 256);
+        ptr[i] = static_cast<char>(i%256);
     }
 
     // 验证数据
     for (size_t i = 0; i < size; ++i) 
     {
-        assert(ptr[i] == static_cast<char>(i % 256));
+        assert(ptr[i] == static_cast<char>(i%256));
     }
 
     MemoryPool::deallocate(ptr, size);
