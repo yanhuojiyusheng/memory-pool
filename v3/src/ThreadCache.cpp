@@ -105,7 +105,7 @@ void ThreadCache::returnToCentralCache(void* start, size_t size)
 
     // 将内存块串成链表
     void* current = start;
-    // 使用对齐后的大小计算分割点
+    // 使用对齐后的大小计算分割点 取到最后一个节点
     void* splitNode = current;
     for (size_t i = 0; i < keepNum - 1; ++i) 
     {
