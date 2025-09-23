@@ -22,7 +22,7 @@ struct BlockHeader
 class SizeClass 
 {
 public:
-    static size_t roundUp(size_t bytes)
+    static size_t roundUp(size_t bytes) //向上取整到ALIGNMENT 的倍数
     {
         return (bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
     }

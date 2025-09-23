@@ -104,12 +104,12 @@ void ThreadCache::returnToCentralCache(void* start, size_t size)
     size_t returnNum = batchNum - keepNum;
 
     // 将内存块串成链表
-    char* current = static_cast<char*>(start);
+    void* current = start;
     // 使用对齐后的大小计算分割点
-    char* splitNode = current;
+    void* splitNode = current;
     for (size_t i = 0; i < keepNum - 1; ++i) 
     {
-        splitNode = reinterpret_cast<char*>(*reinterpret_cast<void**>(splitNode));
+        splitNode = *reinterpret_cast<void**>(splitNode);
         if (splitNode == nullptr) 
         {
             // 如果链表提前结束，更新实际的返回数量
