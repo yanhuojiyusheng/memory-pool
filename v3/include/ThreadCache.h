@@ -16,6 +16,7 @@ namespace Kama_memoryPool
 
         void *allocate(size_t size);
         void deallocate(void *ptr, size_t size);
+        void releaseAll();
 
     private:
         ThreadCache() = default;

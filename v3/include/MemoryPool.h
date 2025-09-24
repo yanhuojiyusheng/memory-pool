@@ -1,6 +1,7 @@
 #pragma once
 #include "ThreadCache.h"
-
+#include "CentralCache.h"
+#include "PageCache.h"
 namespace Kama_memoryPool
 {
 
@@ -15,6 +16,12 @@ namespace Kama_memoryPool
         static void deallocate(void *ptr, size_t size)
         {
             ThreadCache::getInstance()->deallocate(ptr, size);
+        }
+        static void releaseAll()
+        {
+            ThreadCache::getInstance()->releaseAll();
+            CentralCache::getInstance().releaseAll();
+            PageCache::getInstance().releaseAll();
         }
     };
 

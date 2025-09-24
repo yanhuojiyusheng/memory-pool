@@ -22,6 +22,7 @@ namespace Kama_memoryPool
 
         // 释放span
         void deallocateSpan(void *ptr, size_t numPages);
+        void releaseAll();
 
     private:
         PageCache() = default;

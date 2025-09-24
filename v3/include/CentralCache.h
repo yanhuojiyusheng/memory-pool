@@ -16,6 +16,7 @@ namespace Kama_memoryPool
 
         void *fetchRange(size_t index, size_t &batchNum);
         void returnRange(void *start, size_t size, size_t bytes);
+        void releaseAll();
 
     private:
         // 相互是还所有原子指针为nullptr

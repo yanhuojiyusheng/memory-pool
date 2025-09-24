@@ -125,6 +125,19 @@ namespace Kama_memoryPool
         list = span;
     }
 
+    void PageCache::releaseAll()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // 清理 spanMap_
+        for (auto &kv : spanMap_)
+        {
+            munmap(kv.first, kv.second->numPages * PAGE_SIZE);
+            delete kv.second;
+        }
+        spanMap_.clear();
+        freeSpans_.clear();
+    }
+
     void *PageCache::systemAlloc(size_t numPages)
     {
         size_t size = numPages * PAGE_SIZE;

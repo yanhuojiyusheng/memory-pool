@@ -198,6 +198,7 @@ int main()
         testMultiThreading();
         testEdgeCases();
         testStress();
+        MemoryPool::releaseAll();
 
         std::cout << "All tests passed successfully!" << std::endl;
         return 0;

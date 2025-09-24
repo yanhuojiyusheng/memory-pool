@@ -2,6 +2,7 @@
 #include "../include/PageCache.h"
 #include <cassert>
 #include <thread>
+#include "CentralCache.h"
 
 namespace Kama_memoryPool
 {
@@ -145,6 +146,20 @@ namespace Kama_memoryPool
         locks_[index].clear(std::memory_order_release);
     }
 
+    void CentralCache::releaseAll()
+    {
+        for (auto &list : centralFreeList_)
+        {
+            // void *current = list.load(std::memory_order_relaxed);
+            // while (current)
+            // {
+            //     void *next = *reinterpret_cast<void **>(current);
+            //     // 注意：这里只是释放小块内存，Span 的释放交给 PageCache
+            //     current = next;
+            // }
+            list.store(nullptr, std::memory_order_relaxed);
+        }
+    }
     void *CentralCache::fetchFromPageCache(size_t numPages, size_t size)
     {
 

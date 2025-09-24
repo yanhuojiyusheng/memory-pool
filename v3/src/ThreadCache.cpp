@@ -1,5 +1,6 @@
 #include "../include/ThreadCache.h"
 #include "../include/CentralCache.h"
+#include "ThreadCache.h"
 
 namespace Kama_memoryPool
 {
@@ -57,6 +58,20 @@ namespace Kama_memoryPool
         }
     }
 
+    void ThreadCache::releaseAll()
+    {
+        for (size_t i = 0; i < FREE_LIST_SIZE; ++i)
+        {
+            // void *current = freeList_[i];
+            // while (current)
+            // {
+            //     void *next = *reinterpret_cast<void **>(current);
+            //     current = next;
+            // }
+            freeList_[i] = nullptr;
+            freeListSize_[i] = 0;
+        }
+    }
     // 判断是否需要将内存回收给中心缓存
     bool ThreadCache::shouldReturnToCentralCache(size_t index)
     {
