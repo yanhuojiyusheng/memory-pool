@@ -62,12 +62,6 @@ namespace Kama_memoryPool
     {
         for (size_t i = 0; i < FREE_LIST_SIZE; ++i)
         {
-            // void *current = freeList_[i];
-            // while (current)
-            // {
-            //     void *next = *reinterpret_cast<void **>(current);
-            //     current = next;
-            // }
             freeList_[i] = nullptr;
             freeListSize_[i] = 0;
         }
