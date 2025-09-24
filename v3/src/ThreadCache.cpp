@@ -176,7 +176,6 @@ namespace Kama_memoryPool
         size_t maxNum = std::max(size_t(1), MAX_BATCH_SIZE / size);
 
         // 取最小值，但确保至少返回1
-        // return std::max(sizeof(1), std::min(maxNum, baseNum)); 可能写错了，应该最少用1个
         return std::max(size_t(1), std::min(maxNum, baseNum));
     }
 

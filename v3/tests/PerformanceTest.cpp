@@ -72,7 +72,8 @@ public:
 
         std::cout << "\nTesting small allocations (" << NUM_ALLOCS << " allocations of "
                   << SMALL_SIZE << " bytes):" << std::endl;
-
+        double memoryTime;
+        double systemTime;
         // 测试内存池
         {
             Timer t;
@@ -95,9 +96,10 @@ public:
             {
                 MemoryPool::deallocate(ptr, SMALL_SIZE);
             }
-
+            
+            memoryTime = t.elapsed();
             std::cout << "Memory Pool: " << std::fixed << std::setprecision(3)
-                      << t.elapsed() << " ms" << std::endl;
+                      << memoryTime << " ms" << std::endl;
         }
 
         // 测试new/delete
@@ -121,24 +123,27 @@ public:
             {
                 delete[] static_cast<char *>(ptr);
             }
-
+            systemTime = t.elapsed();
             std::cout << "New/Delete: " << std::fixed << std::setprecision(3)
                       << t.elapsed() << " ms" << std::endl;
         }
+        std::cout << "time speed: "<< (systemTime-memoryTime)/systemTime*100<<"%"<<std::endl; 
     }
 
     // 3. 多线程测试
-    static void testMultiThreaded()
+    static void testMultiThreaded(int num_threads=4,int per_thread=25000, int size=256)
     {
-        constexpr size_t NUM_THREADS = 4;
-        constexpr size_t ALLOCS_PER_THREAD = 25000;
-        constexpr size_t MAX_SIZE = 256;
+        const size_t NUM_THREADS = num_threads;
+        const size_t ALLOCS_PER_THREAD = per_thread;
+        const size_t MAX_SIZE = size;
+        double memoryTime;
+        double systemTime;
 
         std::cout << "\nTesting multi-threaded allocations (" << NUM_THREADS
                   << " threads, " << ALLOCS_PER_THREAD << " allocations each):"
                   << std::endl;
 
-        auto threadFunc = [](bool useMemPool)
+        auto threadFunc = [NUM_THREADS,ALLOCS_PER_THREAD,MAX_SIZE](bool useMemPool)
         {
             std::random_device rd;
             std::mt19937 gen(rd());
@@ -198,9 +203,9 @@ public:
             {
                 thread.join();
             }
-
+            memoryTime = t.elapsed();
             std::cout << "Memory Pool: " << std::fixed << std::setprecision(3)
-                      << t.elapsed() << " ms" << std::endl;
+                      << memoryTime << " ms" << std::endl;
         }
 
         // 测试new/delete
@@ -217,10 +222,11 @@ public:
             {
                 thread.join();
             }
-
+            systemTime = t.elapsed();
             std::cout << "New/Delete: " << std::fixed << std::setprecision(3)
-                      << t.elapsed() << " ms" << std::endl;
+                      << systemTime << " ms" << std::endl;
         }
+        std::cout << "time speed: "<< (systemTime-memoryTime)/systemTime*100<<"%"<<std::endl; 
     }
 
     // 4. 混合大小测试
@@ -228,7 +234,8 @@ public:
     {
         constexpr size_t NUM_ALLOCS = 50000;
         const size_t SIZES[] = {16, 32, 64, 128, 256, 512, 1024, 2048};
-
+        double memoryTime;
+        double systemTime;
         std::cout << "\nTesting mixed size allocations (" << NUM_ALLOCS
                   << " allocations):" << std::endl;
 
@@ -260,9 +267,9 @@ public:
             {
                 MemoryPool::deallocate(ptr, size);
             }
-
+            memoryTime = t.elapsed();
             std::cout << "Memory Pool: " << std::fixed << std::setprecision(3)
-                      << t.elapsed() << " ms" << std::endl;
+                      << memoryTime << " ms" << std::endl;
         }
 
         // 测试new/delete
@@ -292,10 +299,11 @@ public:
             {
                 delete[] static_cast<char *>(ptr);
             }
-
+            systemTime = t.elapsed();
             std::cout << "New/Delete: " << std::fixed << std::setprecision(3)
-                      << t.elapsed() << " ms" << std::endl;
+                      << systemTime << " ms" << std::endl;
         }
+        std::cout << "time speed: "<< (systemTime-memoryTime)/systemTime*100<<"%"<<std::endl; 
     }
 };
 
@@ -310,6 +318,6 @@ int main()
     PerformanceTest::testSmallAllocation();
     PerformanceTest::testMultiThreaded();
     PerformanceTest::testMixedSizes();
-
+    MemoryPool::releaseAll();
     return 0;
 }
