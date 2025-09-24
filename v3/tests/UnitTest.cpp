@@ -93,7 +93,7 @@ void testMultiThreading()
                 }
 
                 allocations.push_back({ptr, size});
-
+                // 一边分配一边随机释放一部分
                 if (rand() % 2 && !allocations.empty())
                 {
                     size_t index = rand() % allocations.size();

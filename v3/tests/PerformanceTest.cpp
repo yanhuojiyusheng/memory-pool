@@ -65,10 +65,10 @@ public:
     }
 
     // 2. 小对象分配测试
-    static void testSmallAllocation()
+    static void testSmallAllocation(int num_allocs=100000,size_t size=32)
     {
-        constexpr size_t NUM_ALLOCS = 100000;
-        constexpr size_t SMALL_SIZE = 32;
+        const size_t NUM_ALLOCS = num_allocs;
+        const size_t SMALL_SIZE = size;
 
         std::cout << "\nTesting small allocations (" << NUM_ALLOCS << " allocations of "
                   << SMALL_SIZE << " bytes):" << std::endl;
