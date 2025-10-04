@@ -6,10 +6,17 @@
 namespace Kama_memoryPool
 {
     // 对齐数和大小定义
-    constexpr size_t ALIGNMENT = alignof(std::max_align_t);
+    constexpr size_t ALIGNMENT = 8;
+    constexpr size_t MIDALIGNMENT = 128;
+    constexpr size_t BIGALIGNMENT = 4*1024;
     constexpr size_t MAX_BYTES = 256 * 1024;                 // 256KB
-    constexpr size_t FREE_LIST_SIZE = MAX_BYTES / ALIGNMENT; // 32k  ALIGNMENT等于指针void*的大小
-
+    constexpr size_t MID_THRESHOLD = 1024;
+    constexpr size_t BIG_THRESHOLD = 32*1024;
+    constexpr size_t SMALL_FREE_LIST_SIZE = MID_THRESHOLD / ALIGNMENT; // 32k  ALIGNMENT等于指针void*的大小
+    constexpr size_t MID_FREE_LIST_SIZE = (BIG_THRESHOLD-MID_THRESHOLD)/MIDALIGNMENT;
+    constexpr size_t BIG_FREE_LIST_SIZE = (MAX_BYTES-BIG_THRESHOLD)/BIGALIGNMENT;
+    constexpr size_t FREE_LIST_SIZE = SMALL_FREE_LIST_SIZE+MID_FREE_LIST_SIZE+BIG_FREE_LIST_SIZE;
+    const size_t KThreadMaxSize = 4 << 20;
     // 内存块头部信息
     struct BlockHeader
     {
