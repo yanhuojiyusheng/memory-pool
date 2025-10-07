@@ -23,7 +23,7 @@ namespace Kama_memoryPool
         // 从中心缓存获取内存
         void *fetchFromCentralCache(size_t index);
         // 归还内存到中心缓存
-        void returnToCentralCache(void *start, size_t size);
+        void returnToCentralCache(size_t index);
         // 判断是否需要归还内存给中心缓存
         bool shouldReturnToCentralCache(size_t index);
 

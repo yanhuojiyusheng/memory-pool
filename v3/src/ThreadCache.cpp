@@ -1,5 +1,6 @@
 #include "../include/ThreadCache.h"
 #include "../include/CentralCache.h"
+#include <cassert>
 
 namespace Kama_memoryPool
 {
@@ -50,11 +51,11 @@ namespace Kama_memoryPool
 
         // 更新自由链表大小
         freeListSize_[index]++; // 增加对应大小类的自由链表大小
-        threadBytes_ += SizeClass::classSize(index); 
+        threadBytes_ += SizeClass::classSize(index);
         // 判断是否需要将部分内存回收给中心缓存
         if (shouldReturnToCentralCache(index))
         {
-            returnToCentralCache(freeList_[index], size);
+            returnToCentralCache(index);
         }
     }
 
@@ -69,9 +70,7 @@ namespace Kama_memoryPool
     // 判断是否需要将内存回收给中心缓存
     bool ThreadCache::shouldReturnToCentralCache(size_t index)
     {
-        // 设定阈值，例如：当自由链表的大小超过一定数量时
-        size_t threshold = 64; // 例如，64个内存块
-        return (freeListSize_[index] > threshold);
+        return (freeListSize_[index] > SizeClass::getThreshold(index));
     }
 
     void *ThreadCache::fetchFromCentralCache(size_t index)
@@ -85,7 +84,7 @@ namespace Kama_memoryPool
 
         // 更新自由链表大小
         freeListSize_[index] += batchNum - 1; // 增加对应大小类的自由链表大小
-        threadBytes_+= (batchNum-1)*SizeClass::classSize(index);
+        threadBytes_ += (batchNum - 1) * SizeClass::classSize(index);
 
         // 取一个返回，其余放入线程本地自由链表
         void *result = start;
@@ -97,57 +96,45 @@ namespace Kama_memoryPool
         return result;
     }
 
-    void ThreadCache::returnToCentralCache(void *start, size_t size)
+    void ThreadCache::returnToCentralCache(size_t index)
     {
-        // 根据大小计算对应的索引
-        size_t index = SizeClass::getIndex(size);
+        if (index >= FREE_LIST_SIZE)
+            return;
 
-        // 获取对齐后的实际块大小
-        size_t alignedSize = SizeClass::roundUp(size);
+        void *head = freeList_[index];
+        size_t listLen = freeListSize_[index];
+        if (!head || listLen <= 1)
+            return;
 
-        // 计算要归还内存块数量
-        size_t batchNum = freeListSize_[index];
-        if (batchNum <= 1)
-            return; // 如果只有一个块，则不归还
+        size_t classSize = SizeClass::classSize(index);
+        size_t threshold = SizeClass::getThreshold(index);
+        size_t numToMove = SizeClass::getBatchNum(index);
 
-        // 保留一部分在ThreadCache中（比如保留1/4）
-        size_t keepNum = std::max(batchNum / 4, size_t(1));
-        size_t returnNum = batchNum - keepNum;
+        // 目标保留长度（阈值的一半或批量数）
+        size_t targetKeep = std::max(threshold / 2, numToMove);
+        if (listLen <= targetKeep)
+            return;
+        size_t returnNum = listLen - targetKeep;
 
-        // 将内存块串成链表
-        void *current = start;
-        // 使用对齐后的大小计算分割点 取到最后一个节点
-        void *splitNode = current;
-        for (size_t i = 0; i < keepNum - 1; ++i)
-        {
-            splitNode = *reinterpret_cast<void **>(splitNode);
-            if (splitNode == nullptr)
-            {
-                // 如果链表提前结束，更新实际的返回数量
-                returnNum = batchNum - (i + 1);
-                break;
-            }
-        }
+        // 走到保留段的尾节点
+        void *cur = head;
+        for (size_t i = 1; i < targetKeep && cur; ++i)
+            cur = *reinterpret_cast<void **>(cur);
+        if (!cur)
+            return;
 
-        if (splitNode != nullptr)
-        {
-            // 将要返回的部分和要保留的部分断开
-            void *nextNode = *reinterpret_cast<void **>(splitNode);
-            *reinterpret_cast<void **>(splitNode) = nullptr; // 断开连接
+        // 断链
+        void *returnHead = *reinterpret_cast<void **>(cur);
+        *reinterpret_cast<void **>(cur) = nullptr;
 
-            // 更新ThreadCache的空闲链表
-            freeList_[index] = start;
+        // 更新本地缓存统计
+        freeList_[index] = head;
+        freeListSize_[index] = targetKeep;
+        threadBytes_ -= returnNum * classSize;
 
-            // 更新自由链表大小
-            freeListSize_[index] = keepNum;
-
-            // 将剩余部分返回给CentralCache
-            if (returnNum > 0 && nextNode != nullptr)
-            {
-                CentralCache::getInstance().returnRange(nextNode, returnNum * alignedSize, index);
-            }
-        }
+        // 调用中心缓存释放接口
+        if (returnHead && returnNum > 0)
+            CentralCache::getInstance().returnRange(returnHead,returnNum, index);
     }
-
 
 } // namespace memoryPool
