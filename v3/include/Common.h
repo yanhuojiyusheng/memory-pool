@@ -19,6 +19,20 @@ namespace Kama_memoryPool
     constexpr size_t NUM_CLASSES = SMALL_CLASSES + MID_CLASSES + BIG_CLASSES;      // 432
     constexpr size_t FREE_LIST_SIZE = NUM_CLASSES;
     const size_t KThreadMaxSize = 4 << 20;
+
+    // 统一 4KB 页
+    static constexpr size_t kPageShift = 12;
+    static constexpr size_t kPageSize = 1ULL << kPageShift;
+
+    inline size_t PageIdOf(const void *p)
+    {
+        return (reinterpret_cast<uintptr_t>(p) >> kPageShift);
+    }
+
+    inline void *PageAddrOf(size_t page_id)
+    {
+        return reinterpret_cast<void *>(page_id << kPageShift);
+    }
     // 内存块头部信息
     struct BlockHeader
     {
