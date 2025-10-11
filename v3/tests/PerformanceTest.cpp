@@ -314,8 +314,8 @@ int main()
     // 预热系统
     PerformanceTest::warmup();
 
-    // 运行测试
-    PerformanceTest::testSmallAllocation();
+    // // 运行测试
+    PerformanceTest::testSmallAllocation(100000,31);
     PerformanceTest::testMultiThreaded();
     PerformanceTest::testMixedSizes();
     MemoryPool::releaseAll();

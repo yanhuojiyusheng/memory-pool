@@ -1,172 +1,145 @@
-#include "../include/CentralCache.h"
-#include "../include/PageCache.h"
-#include <cassert>
-#include <thread>
 #include "CentralCache.h"
+#include "PageCache.h"
+#include <cassert>
+#include <cstring>
 
 namespace Kama_memoryPool
 {
 
-    // 每次从PageCache获取span大小（以页为单位）
-    static const size_t SPAN_PAGES = 8;
-
+    // --------------------------------------------------------
+    // 从中心缓存获取一批对象（给 ThreadCache）
+    // --------------------------------------------------------
     void *CentralCache::fetchRange(size_t index, size_t &batchNum)
     {
-        // 索引检查，当索引大于等于FREE_LIST_SIZE时，说明申请内存过大应直接向系统申请
-        if (index >= FREE_LIST_SIZE || batchNum == 0)
+        assert(index < FREE_LIST_SIZE);
+        const size_t objSize = SizeClass::classSize(index);
+        CentralFreeList &cf = centralLists_[index];
+        SpinLockGuard lock(cf.spin);
+
+        // 若无可用 span，则 refill
+        if (cf.nonEmptySpans.empty())
+        {
+            // 目标：每个 span 至少能供 ThreadCache 拿几次 batch，减少 PageCache 调用
+            constexpr size_t targetObjectsPerSpan = 4; // 可调参数，越大越激进
+
+            // 计算对象总字节
+            size_t targetBytes = objSize * batchNum * targetObjectsPerSpan;
+
+            // 保证至少一页，向上取整页数
+            size_t numPages = (targetBytes + kPageSize - 1) / kPageSize;
+            numPages = std::clamp<size_t>(numPages, 1, 8);
+
+            PageCache::Span *span = PageCache::getInstance().allocateSpan(numPages);
+            if (!span)
+            {
+                batchNum = 0;
+                return nullptr;
+            }
+
+            span->sizeClass = static_cast<int>(index);
+            span->totalObjects = (numPages * kPageSize) / objSize;
+            span->freeObjects = span->totalObjects;
+
+            // 构造 freelist
+            char *base = static_cast<char *>(span->pageAddr);
+            for (size_t i = 0; i + 1 < span->totalObjects; ++i)
+                *reinterpret_cast<void **>(base + i * objSize) = base + (i + 1) * objSize;
+            *reinterpret_cast<void **>(base + (span->totalObjects - 1) * objSize) = nullptr;
+            span->freeList = base;
+
+            cf.nonEmptySpans.push_front(span); // 新建 span 必定有空闲
+        }
+
+        // 队首必然有货（无清扫）
+        PageCache::Span *span = cf.nonEmptySpans.front();
+        assert(span->freeObjects > 0 && span->freeList != nullptr);
+
+        // 批量取
+        size_t realBatch = std::min(batchNum, span->freeObjects);
+        if (realBatch == 0)
+        {
+            batchNum = 0;
             return nullptr;
+        }
+        batchNum = realBatch;
 
-        // 自旋锁保护
-        while (locks_[index].test_and_set(std::memory_order_acquire))
+        void *head = span->freeList;
+        void *cur = head;
+        for (size_t i = 1; i < realBatch; ++i)
+            cur = *reinterpret_cast<void **>(cur);
+
+        void *nextHead = *reinterpret_cast<void **>(cur);
+        *reinterpret_cast<void **>(cur) = nullptr;
+
+        span->freeList = nextHead;
+        span->freeObjects -= realBatch;
+
+        // 用尽就出队
+        if (span->freeObjects == 0)
         {
-            std::this_thread::yield(); // 添加线程让步，避免忙等待，避免过度消耗CPU
+            cf.nonEmptySpans.pop_front();
         }
 
-        void *result = nullptr;
-        try
-        {
-            // 尝试从中心缓存获取内存块
-            result = centralFreeList_[index].load(std::memory_order_relaxed);
-
-            if (!result)
-            {
-                // 如果中心缓存为空，从页缓存获取新的内存块
-                size_t size = (index + 1) * ALIGNMENT;
-                size_t numPages = std::max(SPAN_PAGES, (size + PageCache::PAGE_SIZE - 1) / PageCache::PAGE_SIZE);
-                result = fetchFromPageCache(numPages, size);
-
-                if (!result)
-                {
-                    locks_[index].clear(std::memory_order_release);
-                    return nullptr;
-                }
-
-                // 将从PageCache获取的内存块切分成小块
-                char *start = static_cast<char *>(result);
-                // 应该根据实际分配的页计算大小
-                size_t totalBlocks = (numPages * PageCache::PAGE_SIZE) / size;
-                size_t allocBlocks = std::min(batchNum, totalBlocks);
-
-                // 构建返回给ThreadCache的内存块链表
-                if (allocBlocks > 1)
-                {
-                    // 确保至少有两个块才构建链表
-                    // 构建链表
-                    for (size_t i = 1; i < allocBlocks; ++i)
-                    {
-                        void *current = start + (i - 1) * size;
-                        void *next = start + i * size;
-                        *reinterpret_cast<void **>(current) = next;
-                    }
-                    *reinterpret_cast<void **>(start + (allocBlocks - 1) * size) = nullptr;
-                }
-
-                // 构建保留在CentralCache的链表
-                if (totalBlocks > allocBlocks)
-                {
-                    void *remainStart = start + allocBlocks * size;
-                    for (size_t i = allocBlocks + 1; i < totalBlocks; ++i)
-                    {
-                        void *current = start + (i - 1) * size;
-                        void *next = start + i * size;
-                        *reinterpret_cast<void **>(current) = next;
-                    }
-                    *reinterpret_cast<void **>(start + (totalBlocks - 1) * size) = nullptr;
-
-                    centralFreeList_[index].store(remainStart, std::memory_order_release);
-                }
-            }
-            else // 如果中心缓存有index对应大小的内存块
-            {
-                // 从现有链表中获取指定数量的块
-                void *current = result;
-                void *prev = nullptr;
-                size_t count = 0;
-
-                while (current && count < batchNum)
-                {
-                    prev = current;
-                    current = *reinterpret_cast<void **>(current);
-                    count++;
-                }
-                batchNum = count;
-
-                if (prev) // 当前centralFreeList_[index]链表上的内存块大于batchNum时需要用到
-                {
-                    *reinterpret_cast<void **>(prev) = nullptr;
-                }
-
-                centralFreeList_[index].store(current, std::memory_order_release);
-            }
-        }
-        catch (...)
-        {
-            locks_[index].clear(std::memory_order_release);
-            throw;
-        }
-
-        // 释放锁
-        locks_[index].clear(std::memory_order_release);
-        return result;
+        return head;
     }
 
-    void CentralCache::returnRange(void *start, size_t size, size_t index)
+    void CentralCache::returnRange(size_t index, void *head, size_t n)
     {
-        // 当索引大于等于FREE_LIST_SIZE时，说明内存过大应直接向系统归还
-        if (!start || index >= FREE_LIST_SIZE)
+        if (!head || n == 0)
             return;
 
-        while (locks_[index].test_and_set(std::memory_order_acquire))
-        {
-            std::this_thread::yield();
-        }
+        CentralFreeList &cf = centralLists_[index];
 
-        try
+        SpinLockGuard lock(cf.spin);
+
+        PageCache &pageCache = PageCache::getInstance();
+
+        void *cur = head;
+        for (size_t i = 0; i < n && cur; ++i)
         {
-            // 找到要归还的链表的最后一个节点
-            void *end = start;
-            size_t count = 1;
-            while (*reinterpret_cast<void **>(end) != nullptr && count < size)
+            void *next = *reinterpret_cast<void **>(cur);
+
+            size_t pageId = PageIdOf(cur);
+            PageCache::Span *span = pageCache.mapFind(pageId);
+
+            if (!span)
             {
-                end = *reinterpret_cast<void **>(end);
-                count++;
+                cur = next;
+                continue; // skip unknown
             }
 
-            // 将归还的链表连接到中心缓存的链表头部
-            void *current = centralFreeList_[index].load(std::memory_order_relaxed);
-            *reinterpret_cast<void **>(end) = current;                       // 将原链表头接到归还链表的尾部
-            centralFreeList_[index].store(start, std::memory_order_release); // 将归还的链表头设为新的链表头
-        }
-        catch (...)
-        {
-            locks_[index].clear(std::memory_order_release);
-            throw;
-        }
+            // 插入当前对象到对应 span 的 freelist
+            *reinterpret_cast<void **>(cur) = span->freeList;
+            span->freeList = cur;
+            span->freeObjects++;
 
-        locks_[index].clear(std::memory_order_release);
+            // 如果 span 由空变非空
+            if (span->freeObjects == 1)
+                cf.nonEmptySpans.push_back(span);
+
+            // 如果 span 全部回收，则归还给 PageCache
+            if (span->freeObjects == span->totalObjects)
+            {
+                cf.nonEmptySpans.remove(span);
+                span->freeList = nullptr;
+                span->sizeClass = 0;
+                pageCache.deallocateSpan(span);
+            }
+
+            cur = next;
+        }
     }
 
+    // --------------------------------------------------------
+    // 释放所有 Span（测试 / 销毁用）
+    // --------------------------------------------------------
     void CentralCache::releaseAll()
     {
-        for (auto &list : centralFreeList_)
+        for (auto &cf : centralLists_)
         {
-            list.store(nullptr, std::memory_order_relaxed);
-        }
-    }
-    void *CentralCache::fetchFromPageCache(size_t numPages, size_t size)
-    {
-
-        // 2. 根据大小决定分配策略
-        if (size <= SPAN_PAGES * PageCache::PAGE_SIZE)
-        {
-            // 小于等于32KB的请求，使用固定8页
-            return PageCache::getInstance().allocateSpan(SPAN_PAGES);
-        }
-        else
-        {
-            // 大于32KB的请求，按实际需求分配
-            return PageCache::getInstance().allocateSpan(numPages);
+            SpinLockGuard lock(cf.spin);
+            cf.nonEmptySpans.clear();
         }
     }
 
-} // namespace memoryPool
+} // namespace Kama_memoryPool

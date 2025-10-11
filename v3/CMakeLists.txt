@@ -6,8 +6,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 编译选项
-add_compile_options(-Wall -O0)
-
+add_compile_options(-Wall -O2)
+# # 启用 AddressSanitizer 调试
+# if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+#     message(STATUS "AddressSanitizer enabled (Debug mode)")
+#     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+#     add_link_options(-fsanitize=address)
+# endif()
 # 查找pthread库
 find_package(Threads REQUIRED)
 
@@ -34,9 +39,17 @@ add_executable(perf_test
     ${TEST_DIR}/PerformanceTest.cpp
 )
 
+# 创建性能测试可执行文件
+add_executable(new_test
+    ${SOURCES}
+    ${TEST_DIR}/NewTest.cpp
+)
+
 # 链接pthread库
 target_link_libraries(unit_test PRIVATE Threads::Threads)
 target_link_libraries(perf_test PRIVATE Threads::Threads)
+target_link_libraries(new_test PRIVATE Threads::Threads)
+
 
 # 添加测试命令
 add_custom_target(test
@@ -47,4 +60,8 @@ add_custom_target(test
 add_custom_target(perf
     COMMAND ./perf_test
     DEPENDS perf_test
+)
+add_custom_target(new
+    COMMAND ./new_test
+    DEPENDS new_test
 )

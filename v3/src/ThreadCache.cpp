@@ -70,7 +70,7 @@ namespace Kama_memoryPool
     // 判断是否需要将内存回收给中心缓存
     bool ThreadCache::shouldReturnToCentralCache(size_t index)
     {
-        return (freeListSize_[index] > SizeClass::getThreshold(index));
+        return (freeListSize_[index] > SizeClass::getThreshold(index) && threadBytes_>KThreadMaxSize);
     }
 
     void *ThreadCache::fetchFromCentralCache(size_t index)
@@ -134,7 +134,7 @@ namespace Kama_memoryPool
 
         // 调用中心缓存释放接口
         if (returnHead && returnNum > 0)
-            CentralCache::getInstance().returnRange(returnHead,returnNum, index);
+            CentralCache::getInstance().returnRange(index, returnHead,returnNum);
     }
 
 } // namespace memoryPool

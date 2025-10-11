@@ -8,15 +8,15 @@ namespace Kama_memoryPool
 {
     // 对齐数和大小定义
     constexpr size_t ALIGNMENT = 8;
-    constexpr size_t MIDALIGNMENT = 128;
-    constexpr size_t BIGALIGNMENT = 4 * 1024;
-    constexpr size_t MAX_BYTES = 256 * 1024; // 256KB
+    constexpr size_t MIDALIGNMENT = 64;
+    constexpr size_t BIGALIGNMENT = 256;
+    constexpr size_t MAX_BYTES = 32 * 1024; // 32KB
     constexpr size_t MID_THRESHOLD = 1024;
-    constexpr size_t BIG_THRESHOLD = 32 * 1024;
+    constexpr size_t BIG_THRESHOLD = 8 * 1024;
     constexpr size_t SMALL_CLASSES = MID_THRESHOLD / ALIGNMENT;                    // 128
-    constexpr size_t MID_CLASSES = (BIG_THRESHOLD - MID_THRESHOLD) / MIDALIGNMENT; // 248
-    constexpr size_t BIG_CLASSES = (MAX_BYTES - BIG_THRESHOLD) / BIGALIGNMENT;     // 56
-    constexpr size_t NUM_CLASSES = SMALL_CLASSES + MID_CLASSES + BIG_CLASSES;      // 432
+    constexpr size_t MID_CLASSES = (BIG_THRESHOLD - MID_THRESHOLD) / MIDALIGNMENT; // 112
+    constexpr size_t BIG_CLASSES = (MAX_BYTES - BIG_THRESHOLD) / BIGALIGNMENT;     // 96
+    constexpr size_t NUM_CLASSES = SMALL_CLASSES + MID_CLASSES + BIG_CLASSES;      // 384
     constexpr size_t FREE_LIST_SIZE = NUM_CLASSES;
     const size_t KThreadMaxSize = 4 << 20;
 
@@ -33,32 +33,10 @@ namespace Kama_memoryPool
     {
         return reinterpret_cast<void *>(page_id << kPageShift);
     }
-    // 内存块头部信息
-    struct BlockHeader
-    {
-        size_t size;       // 内存块大小
-        bool inUse;        // 使用标志
-        BlockHeader *next; // 指向下一个内存块
-    };
 
     class SizeClass
     {
     public:
-        // -----------------------
-        // 基础参数定义
-        // -----------------------
-        static constexpr size_t ALIGNMENT = 8;             // 小对象对齐
-        static constexpr size_t MIDALIGNMENT = 128;        // 中对象对齐
-        static constexpr size_t BIGALIGNMENT = 4 * 1024;   // 大对象对齐
-        static constexpr size_t MID_THRESHOLD = 1024;      // 1KB
-        static constexpr size_t BIG_THRESHOLD = 32 * 1024; // 32KB
-        static constexpr size_t MAX_BYTES = 256 * 1024;    // 256KB
-
-        static constexpr size_t SMALL_CLASSES = MID_THRESHOLD / ALIGNMENT;                    // 128
-        static constexpr size_t MID_CLASSES = (BIG_THRESHOLD - MID_THRESHOLD) / MIDALIGNMENT; // 248
-        static constexpr size_t BIG_CLASSES = (MAX_BYTES - BIG_THRESHOLD) / BIGALIGNMENT;     // 56
-        static constexpr size_t NUM_CLASSES = SMALL_CLASSES + MID_CLASSES + BIG_CLASSES;      // 432
-
         // -----------------------
         // 每个大小类的元信息
         // -----------------------
@@ -69,80 +47,93 @@ namespace Kama_memoryPool
             size_t threshold; // 自由链表触发归还的上限
         };
 
-        // -----------------------
-        // 构建 class 信息表（仅初始化一次）
-        // -----------------------
+        // ================================================================
+        // SizeClass::table() —— 自适应分级 size-class 映射表生成函数
+        // 适配对齐与区间定义：
+        //   [8, 1KB]     —— 8B 对齐，小对象，共 128 类
+        //   (1KB, 8KB]   —— 64B 对齐，中对象，共 112 类
+        //   (8KB, 32KB]  —— 256B 对齐，大对象，共 96 类
+        //   总计 384 类
+        // ================================================================
         static inline const std::array<ClassInfo, NUM_CLASSES> &table()
         {
-            static const std::array<ClassInfo, NUM_CLASSES> t = []
+            auto clamp = [](size_t v, size_t lo, size_t hi)
+            {
+                return std::max(lo, std::min(v, hi));
+            };
+
+            static const std::array<ClassInfo, NUM_CLASSES> t = [&clamp]()
             {
                 std::array<ClassInfo, NUM_CLASSES> arr{};
                 size_t idx = 0;
 
-                // -------------------------------
-                // 小对象 [8, 1024]  8B 对齐
-                // -------------------------------
+                // ================================================================
+                // 一、小对象区间 [8B, 1024B] —— 8B 对齐
+                // ------------------------------------------------
+                // - 批量 (batch)：一次 transfer 约 32KB，对应 batch = 32KB / size
+                //   限制在 [2, 256]，保证小对象批量足够
+                // - 阈值 (threshold)：ThreadCache 最大保留量
+                //   = max(base, batch * 6)，允许热点对象留更多
+                // ================================================================
                 for (size_t i = 0; i < SMALL_CLASSES; ++i, ++idx)
                 {
                     size_t sz = (i + 1) * ALIGNMENT;
-                    // 每批约 4KB，总量上限 512
-                    size_t batch = std::max<size_t>(2, 4096 / sz);
-                    batch = std::min<size_t>(batch, 512);
+                    size_t batch = clamp((32 * 1024) / sz, (size_t)2, (size_t)256);
 
-                    // 基础门限（base threshold）
                     size_t base;
                     if (sz <= 64)
-                        base = 512;
+                        base = 1024;
                     else if (sz <= 256)
-                        base = 256;
+                        base = 512;
                     else
-                        base = 128;
+                        base = 256;
 
-                    // 最终门限 = max(base, batch * 2)
-                    size_t threshold = std::max(base, batch * 2);
-
+                    size_t threshold = std::max(base, batch * 6);
                     arr[idx] = {sz, batch, threshold};
                 }
 
-                // -------------------------------
-                // 中对象 (1KB, 32KB]  128B 对齐
-                // -------------------------------
+                // ================================================================
+                // 二、中对象区间 (1KB, 8KB] —— 64B 对齐
+                // ------------------------------------------------
+                // - 一次 transfer 约 32KB
+                // - batch = clamp(32KB / size, 1, 128)
+                // - threshold = max(base, batch * 4)
+                // ================================================================
                 for (size_t i = 0; i < MID_CLASSES; ++i, ++idx)
                 {
                     size_t sz = MID_THRESHOLD + (i + 1) * MIDALIGNMENT;
-                    // 每批约 32KB
-                    size_t batch = std::max<size_t>(1, 32768 / sz);
+                    size_t batch = clamp((32 * 1024) / sz, (size_t)1, (size_t)128);
 
-                    // 基础门限
                     size_t base;
-                    if (sz <= 4096)
-                        base = 64;
+                    if (sz <= 4 * 1024)
+                        base = 128;
                     else
-                        base = 32;
+                        base = 64;
 
-                    // 最终门限
-                    size_t threshold = std::max(base, batch * 2);
-
+                    size_t threshold = std::max(base, batch * 4);
                     arr[idx] = {sz, batch, threshold};
                 }
 
-                // -------------------------------
-                // 大对象 (32KB, 256KB]  4KB 对齐
-                // -------------------------------
+                // ================================================================
+                // 三、大对象区间 (8KB, 32KB] —— 256B 对齐
+                // ------------------------------------------------
+                // - 对象太大，不适合批量分配
+                // - batch 固定为 1
+                // - threshold 仅少量缓存（16~64）
+                // ================================================================
                 for (size_t i = 0; i < BIG_CLASSES; ++i, ++idx)
                 {
                     size_t sz = BIG_THRESHOLD + (i + 1) * BIGALIGNMENT;
-                    size_t batch = 1; // 太大不适合批量
-
-                    // 基础门限：大对象几乎不缓存
-                    size_t base = (sz <= 65536) ? 8 : 4;
-                    size_t threshold = std::max(base, batch * 2);
+                    size_t batch = 1;
+                    size_t base = (sz <= 16 * 1024) ? 64 : 32;
+                    size_t threshold = base;
 
                     arr[idx] = {sz, batch, threshold};
                 }
 
                 return arr;
             }();
+
             return t;
         }
 
